@@ -87,22 +87,30 @@ io.on('connection', socket => {
     console.log('room-created', room.id);
   });
 
-  // Join room
-  socket.on('join-room', (data) => {
-    try {
-      const { roomId, user } = data || {};
-      const room = findRoom(roomId);
-      if (!room) return;
-      socket.join(roomId);
-      if (!room.members.includes(user.id)) room.members.push(user.id);
-      room.memberCount = room.members.length;
-      // optionally mark owner online if user is owner
-      if (room.ownerId === user.id) room.ownerOnline = true;
-      io.to(roomId).emit('room-updated', room);
-      io.emit('room-updated', room); // update listing too
-      console.log(`user ${user.id} joined ${roomId}`);
-    } catch (e) { console.error('join-room err', e); }
-  });
+// Join room (substitua seu handler existente por este)
+socket.on('join-room', (data) => {
+  try {
+    const { roomId, user } = data || {};
+    const room = findRoom(roomId);
+    if (!room) return;
+    // reply to the joining socket with current clients in room
+    const currentClients = room.members ? [...room.members] : [];
+    socket.emit('room-clients', currentClients); // informs joining client who is in the room
+
+    // notify others in the room that a new user joined
+    socket.join(roomId);
+    if (!room.members.includes(user.id)) room.members.push(user.id);
+    room.memberCount = room.members.length;
+    // mark owner online if same
+    if (room.ownerId === user.id) room.ownerOnline = true;
+
+    // Emit update and user-joined event to others (excluding the joining socket)
+    socket.to(roomId).emit('user-joined', user.id);
+    io.to(roomId).emit('room-updated', room);
+    io.emit('room-updated', room);
+    console.log(`user ${user.id} joined ${roomId}`);
+  } catch (e) { console.error('join-room err', e); }
+});
 
   // Leave room
   socket.on('leave-room', (data) => {
@@ -210,4 +218,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Signaling server running on port', PORT);
 });
+
 
