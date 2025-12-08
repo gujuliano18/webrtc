@@ -105,45 +105,49 @@ io.on('connection', socket => {
     }
   });
 
-  // Join room - register mapping userId <-> socket.id, reply room-clients (userIds) to joiner
-  socket.on('join-room', (data) => {
-    try {
-      const { roomId, user } = data || {};
-      const room = findRoom(roomId);
-      if (!room) {
-        socket.emit('join-failed', { reason: 'room-not-found' });
-        return;
-      }
-
-      // Register mapping
-      if (user && user.id) {
-        userIdToSocket.set(user.id, socket.id);
-        socketIdToUserId.set(socket.id, user.id);
-        socket.data.userId = user.id;
-      }
-
-      // Send who is already in the room (userIds)
-      const currentClients = (room.members || []).slice();
-      socket.emit('room-clients', currentClients);
-
-      // Join socket.io room
-      socket.join(roomId);
-      if (!room.members.includes(user.id)) room.members.push(user.id);
-      room.memberCount = room.members.length;
-      if (room.ownerId === user.id) room.ownerOnline = true;
-
-      // Notify other clients (in room) a user-joined (userId)
-      socket.to(roomId).emit('user-joined', user.id);
-
-      // Broadcast updated room state
-      io.to(roomId).emit('room-updated', room);
-      io.emit('room-updated', room);
-      console.log(`user ${user.id} joined ${roomId} (socket ${socket.id})`);
-    } catch (e) {
-      console.error('join-room err', e);
-      socket.emit('join-failed', { reason: 'server_error' });
+socket.on('join-room', (data, ack) => {
+  try {
+    const { roomId, user } = data || {};
+    const room = findRoom(roomId);
+    if (!room) {
+      if (typeof ack === 'function') ack({ ok: false, reason: 'room-not-found' });
+      socket.emit('join-failed', { reason: 'room-not-found' });
+      return;
     }
-  });
+
+    // Register mapping
+    if (user && user.id) {
+      userIdToSocket.set(user.id, socket.id);
+      socketIdToUserId.set(socket.id, user.id);
+      socket.data.userId = user.id;
+    }
+
+    // Send who is already in the room (userIds)
+    const currentClients = (room.members || []).slice();
+    socket.emit('room-clients', currentClients);
+
+    // Join socket.io room
+    socket.join(roomId);
+    if (!room.members.includes(user.id)) room.members.push(user.id);
+    room.memberCount = room.members.length;
+    if (room.ownerId === user.id) room.ownerOnline = true;
+
+    // Notify other clients (in room) a user-joined (userId)
+    socket.to(roomId).emit('user-joined', user.id);
+
+    // Broadcast updated room state
+    io.to(roomId).emit('room-updated', room);
+    io.emit('room-updated', room);
+    console.log(`user ${user.id} joined ${roomId} (socket ${socket.id})`);
+
+    // send ack success if provided
+    if (typeof ack === 'function') ack({ ok: true });
+  } catch (e) {
+    console.error('join-room err', e);
+    if (typeof ack === 'function') ack({ ok: false, reason: 'server_error' });
+    socket.emit('join-failed', { reason: 'server_error' });
+  }
+});
 
   // Leave room
   socket.on('leave-room', (data) => {
@@ -313,4 +317,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Signaling server running on port', PORT);
 });
+
 
