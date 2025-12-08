@@ -31,6 +31,24 @@ const upload = multer({ storage, limits: { fileSize: 8 * 1024 * 1024 } });
 // room: { id, name, cover, ownerId, ownerName, ownerOnline, memberCount, members:[], micSlots:{}, chat:[], createdAt }
 let rooms = [];
 
+// create default 'hall' room if not present
+if (!findRoom('hall')) {
+  rooms.unshift({
+    id: 'hall',
+    name: 'Hall',
+    cover: null,
+    ownerId: null,
+    ownerName: null,
+    ownerOnline: false,
+    memberCount: 0,
+    members: [],
+    micSlots: {},
+    chat: [],
+    createdAt: Date.now()
+  });
+  console.log('default room "hall" created');
+}
+
 // Helper
 function findRoom(id) { return rooms.find(r => r.id === id); }
 
@@ -295,3 +313,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Signaling server running on port', PORT);
 });
+
