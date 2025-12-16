@@ -58,27 +58,29 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 app.use('/uploads', express.static(UPLOAD_DIR));
 
-// ===== NOVO ENDPOINT: BIG WIN NOTIFICATION (chamado pelo spin.php) =====
-app.post('/bigwin', (req, res) => {
-  const { user_id, username, amount } = req.body;
+// ENDPOINT BIG WIN — SUPER TOLERANTE (funciona mesmo se o PHP mandar errado)
+app.all('/bigwin', (req, res) => {
+  console.log('RECEBIDO /bigwin →', req.method, req.body, req.query);
 
-  if (!user_id || !username || !amount) {
-    console.log('⚠️ /bigwin chamado com dados inválidos:', req.body);
-    return res.status(400).send('Dados inválidos');
+  let user_id = req.body.user_id || req.query.user_id;
+  let username = req.body.username || req.query.username || 'Jogador';
+  let amount = req.body.amount || req.query.amount;
+
+  if (!user_id || !amount) {
+    console.log('DADOS INCOMPLETOS no /bigwin:', req.body, req.query);
+    return res.status(400).send('Faltam dados');
   }
 
-  const winnerUserId = parseInt(user_id);
-  const winnerName = String(username).trim() || 'Jogador';
-  const winAmount = parseFloat(amount).toFixed(2);
+  user_id = parseInt(user_id);
+  amount = parseFloat(amount).toFixed(2);
 
-  const message = `${winnerName} ganhou ${winAmount} créditos! 🎰`;
+  const message = `${username} ganhou ${amount} créditos!`;
 
-  console.log(`🎉 BIG WIN DETECTADO E ENVIADO! ${message} (excluindo user_id ${winnerUserId})`);
+  console.log(`BROADCAST BIG WIN → ${message} (excluindo user ${user_id})`);
 
-  // Broadcast
   io.sockets.sockets.forEach((socket) => {
-    const socketUserId = socket.data.userId || socketIdToUserId.get(socket.id);
-    if (socketUserId && socketUserId !== winnerUserId) {
+    const sid = socket.data?.userId || socketIdToUserId.get(socket.id);
+    if (sid && sid !== user_id) {
       socket.emit('big-win-toast', { message });
     }
   });
@@ -292,4 +294,5 @@ server.listen(PORT, () => {
   console.log(`Servidor de voz + notificações rodando na porta ${PORT}`);
   console.log(`Keep-alive ativo | Mobile otimizado | Big Win Toast integrado`);
 });
+
 
