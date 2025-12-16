@@ -1,4 +1,4 @@
-// server.js — VERSÃO FINAL OTIMIZADA PARA MOBILE + ESTABILIDADE
+// server.js — VERSÃO FINAL OTIMIZADA PARA MOBILE + ESTABILIDADE + BIG WIN TOAST
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -11,6 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));
+app.use(express.urlencoded({ extended: true })); // NECESSÁRIO para receber dados do PHP
 
 // Uploads
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -48,22 +49,52 @@ function findRoom(id) { return rooms.find(r => r.id === id); }
 // HTTP
 app.get('/', (req, res) => res.send('Voice Rooms Server — Running'));
 app.get('/rooms', (req, res) => res.json(rooms));
+
 app.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
   const url = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
   res.json({ url });
 });
+
 app.use('/uploads', express.static(UPLOAD_DIR));
+
+// ===== NOVO ENDPOINT: BIG WIN NOTIFICATION (chamado pelo spin.php) =====
+app.post('/bigwin', (req, res) => {
+  const { user_id, username, amount } = req.body;
+
+  if (!user_id || !username || !amount) {
+    return res.status(400).send('Dados inválidos: user_id, username e amount são obrigatórios');
+  }
+
+  const winnerUserId = parseInt(user_id);
+  const winnerName = String(username).trim() || 'Jogador';
+  const winAmount = parseFloat(amount);
+
+  const message = `${winnerName} ganhou ${winAmount.toFixed(2)} créditos! 🎰`;
+
+  console.log(`BIG WIN! ${message} (user_id: ${winnerUserId})`);
+
+  // Envia para TODOS os clientes conectados, exceto o próprio ganhador
+  io.sockets.sockets.forEach((socket) => {
+    const socketUserId = socket.data.userId || socketIdToUserId.get(socket.id);
+    if (socketUserId && socketUserId !== winnerUserId) {
+      socket.emit('big-win-toast', { message });
+    }
+  });
+
+  res.send('OK');
+});
+// ======================================================================
 
 // Socket.IO Server com configurações anti-desconexão mobile
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  pingInterval: 10000,        // 10s (mais frequente)
-  pingTimeout: 5000,          // 5s
-  maxHttpBufferSize: 1e8,     // 100MB (para ICE grandes)
-  transports: ['websocket'],  // mais estável em mobile
-  allowEIO3: true             // compatibilidade com clientes antigos (se precisar)
+  pingInterval: 10000,
+  pingTimeout: 5000,
+  maxHttpBufferSize: 1e8,
+  transports: ['websocket'],
+  allowEIO3: true
 });
 
 // Mapeamento userId ↔ socketId
@@ -76,22 +107,19 @@ function broadcastRoomUpdate(room) {
     ...room,
     members: [...room.members],
     micSlots: { ...room.micSlots },
-    chat: room.chat.slice(-100) // limita histórico
+    chat: room.chat.slice(-100)
   };
   io.to(room.id).emit('room-updated', cleanRoom);
-  io.emit('room-updated', cleanRoom); // atualiza lista global
+  io.emit('room-updated', cleanRoom);
 }
 
 io.on('connection', socket => {
   console.log('Nova conexão:', socket.id);
 
-  // Keep-alive manual (client manda a cada ~25s)
   socket.on('keep-alive', () => {
-    // Apenas responde para manter o socket vivo
     socket.emit('pong');
   });
 
-  // Forçar atualização do estado da sala (útil após reconexão)
   socket.on('request-room-update', ({ roomId }) => {
     const room = findRoom(roomId);
     if (room) {
@@ -108,7 +136,6 @@ io.on('connection', socket => {
         return socket.emit('join-failed', { reason: 'room-not-found' });
       }
 
-      // Mapeamento user ↔ socket
       if (user?.id) {
         userIdToSocket.set(user.id, socket.id);
         socketIdToUserId.set(socket.id, user.id);
@@ -123,13 +150,8 @@ io.on('connection', socket => {
       }
       room.memberCount = room.members.length;
 
-      // Notifica quem já estava na sala
       socket.emit('room-clients', room.members.filter(id => id !== user.id));
-
-      // Notifica os outros que entrou
       socket.to(roomId).emit('user-joined', user.id);
-
-      // Atualiza estado da sala
       broadcastRoomUpdate(room);
 
       console.log(`User ${user.id} entrou na sala ${roomId}`);
@@ -148,7 +170,6 @@ io.on('connection', socket => {
     socket.leave(roomId);
     room.members = room.members.filter(id => id !== userId);
 
-    // Libera mic
     Object.keys(room.micSlots).forEach(slot => {
       if (room.micSlots[slot]?.id === userId) {
         delete room.micSlots[slot];
@@ -212,7 +233,7 @@ io.on('connection', socket => {
     io.to(roomId).emit('chat-message', msg);
   });
 
-  // WebRTC Signaling (userId → socketId)
+  // WebRTC Signaling
   const forwardToUser = (targetUserId, event, data) => {
     const targetSocketId = userIdToSocket.get(targetUserId);
     if (targetSocketId) {
@@ -243,7 +264,6 @@ io.on('connection', socket => {
       userIdToSocket.delete(userId);
       socketIdToUserId.delete(socket.id);
 
-      // Remove de todas as salas
       rooms.forEach(room => {
         let changed = false;
         if (room.members.includes(userId)) {
@@ -268,6 +288,6 @@ io.on('connection', socket => {
 // Start
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Servidor de voz rodando na porta ${PORT}`);
-  console.log(`Keep-alive ativo | Mobile otimizado`);
+  console.log(`Servidor de voz + notificações rodando na porta ${PORT}`);
+  console.log(`Keep-alive ativo | Mobile otimizado | Big Win Toast integrado`);
 });
