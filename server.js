@@ -63,18 +63,19 @@ app.post('/bigwin', (req, res) => {
   const { user_id, username, amount } = req.body;
 
   if (!user_id || !username || !amount) {
-    return res.status(400).send('Dados inválidos: user_id, username e amount são obrigatórios');
+    console.log('⚠️ /bigwin chamado com dados inválidos:', req.body);
+    return res.status(400).send('Dados inválidos');
   }
 
   const winnerUserId = parseInt(user_id);
   const winnerName = String(username).trim() || 'Jogador';
-  const winAmount = parseFloat(amount);
+  const winAmount = parseFloat(amount).toFixed(2);
 
-  const message = `${winnerName} ganhou ${winAmount.toFixed(2)} créditos! 🎰`;
+  const message = `${winnerName} ganhou ${winAmount} créditos! 🎰`;
 
-  console.log(`BIG WIN! ${message} (user_id: ${winnerUserId})`);
+  console.log(`🎉 BIG WIN DETECTADO E ENVIADO! ${message} (excluindo user_id ${winnerUserId})`);
 
-  // Envia para TODOS os clientes conectados, exceto o próprio ganhador
+  // Broadcast
   io.sockets.sockets.forEach((socket) => {
     const socketUserId = socket.data.userId || socketIdToUserId.get(socket.id);
     if (socketUserId && socketUserId !== winnerUserId) {
@@ -291,3 +292,4 @@ server.listen(PORT, () => {
   console.log(`Servidor de voz + notificações rodando na porta ${PORT}`);
   console.log(`Keep-alive ativo | Mobile otimizado | Big Win Toast integrado`);
 });
+
