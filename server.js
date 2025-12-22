@@ -1,5 +1,5 @@
 // =====================================================
-// server.js — VOICE + REALTIME STATS (FINAL)
+// server.js — VOICE + REALTIME STATS (FINAL ESTÁVEL)
 // =====================================================
 
 const express = require('express');
@@ -11,16 +11,16 @@ const fs = require('fs');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
-// ======================
+// =====================================================
 // APP BASE
-// ======================
+// =====================================================
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));
 
-// ======================
+// =====================================================
 // UPLOADS
-// ======================
+// =====================================================
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
@@ -29,6 +29,7 @@ const storage = multer.diskStorage({
   filename: (_, file, cb) =>
     cb(null, uuidv4() + path.extname(file.originalname))
 });
+
 const upload = multer({
   storage,
   limits: { fileSize: 8 * 1024 * 1024 }
@@ -42,9 +43,9 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 app.use('/uploads', express.static(UPLOAD_DIR));
 
-// ======================
+// =====================================================
 // ROOMS (VOICE)
-// ======================
+// =====================================================
 let rooms = [];
 
 function findRoom(id) {
@@ -69,12 +70,12 @@ if (!findRoom('hall')) {
   console.log('Sala padrão "hall" criada');
 }
 
-app.get('/', (_, res) => res.send('Voice Rooms Server — Running'));
+app.get('/', (_, res) => res.send('Voice + Stats Server — Running'));
 app.get('/rooms', (_, res) => res.json(rooms));
 
-// ======================
+// =====================================================
 // SOCKET.IO SERVER
-// ======================
+// =====================================================
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -86,20 +87,20 @@ const io = new Server(server, {
   allowEIO3: true
 });
 
-// ======================
+// =====================================================
 // MAPS
-// ======================
+// =====================================================
 const userIdToSocket = new Map();
 const socketIdToUserId = new Map();
 
-// ======================
-// REALTIME STATS
-// ======================
-const statsUsers = new Map(); // socket.id → stats
+// =====================================================
+// REALTIME STATS (GLOBAL STATE)
+// =====================================================
+const statsUsers = new Map(); // socket.id → user stats
 
-// ======================
+// =====================================================
 // HELPERS
-// ======================
+// =====================================================
 function broadcastRoomUpdate(room) {
   const cleanRoom = {
     ...room,
@@ -107,32 +108,35 @@ function broadcastRoomUpdate(room) {
     micSlots: { ...room.micSlots },
     chat: room.chat.slice(-100)
   };
+
   io.to(room.id).emit('room-updated', cleanRoom);
   io.emit('room-updated', cleanRoom);
 }
 
-// ======================
+// =====================================================
 // SOCKET EVENTS
-// ======================
+// =====================================================
 io.on('connection', socket => {
   console.log('Nova conexão:', socket.id);
 
-  // Keep-alive manual (mobile)
+  // =====================================================
+  // KEEP ALIVE (MOBILE)
+  // =====================================================
   socket.on('keep-alive', () => socket.emit('pong'));
 
-  // ======================
+  // =====================================================
   // STATS — JOIN
-  // ======================
+  // =====================================================
   socket.on('stats:join', data => {
     statsUsers.set(socket.id, {
+      socket_id: socket.id,
       user_id: data.user_id,
       username: data.username || '',
       page: data.page || '',
+      ip: data.ip || socket.handshake.address,
+      city: data.city || '',
+      country: data.country || '',
       ua: data.ua || '',
-      local_time: data.local_time || '',
-      ip:
-        socket.handshake.headers['x-forwarded-for'] ||
-        socket.handshake.address,
       connected_at: Date.now(),
       last_seen: Date.now(),
       hidden: false
@@ -141,17 +145,25 @@ io.on('connection', socket => {
     io.emit('stats:broadcast', Array.from(statsUsers.values()));
   });
 
+  // =====================================================
+  // STATS — UPDATE (CRÍTICO)
+  // =====================================================
   socket.on('stats:update', data => {
     const u = statsUsers.get(socket.id);
     if (!u) return;
-    u.page = data.page || u.page;
+
+    u.page = data.page ?? u.page;
     u.last_seen = Date.now();
+
+    io.emit('stats:broadcast', Array.from(statsUsers.values()));
   });
 
   socket.on('stats:visibility', data => {
     const u = statsUsers.get(socket.id);
     if (!u) return;
+
     u.hidden = !!data.hidden;
+    io.emit('stats:broadcast', Array.from(statsUsers.values()));
   });
 
   socket.on('stats:leave', () => {
@@ -159,14 +171,14 @@ io.on('connection', socket => {
     io.emit('stats:broadcast', Array.from(statsUsers.values()));
   });
 
-  // ======================
+  // =====================================================
   // VOICE — JOIN ROOM
-  // ======================
+  // =====================================================
   socket.on('join-room', ({ roomId, user }, ack) => {
     try {
       const room = findRoom(roomId);
       if (!room) {
-        ack?.({ ok: false });
+        ack?.({ ok: false, reason: 'room-not-found' });
         return;
       }
 
@@ -189,6 +201,7 @@ io.on('connection', socket => {
         'room-clients',
         room.members.filter(id => id !== user.id)
       );
+
       socket.to(roomId).emit('user-joined', user.id);
 
       broadcastRoomUpdate(room);
@@ -259,9 +272,9 @@ io.on('connection', socket => {
     io.to(roomId).emit('chat-message', msg);
   });
 
-  // ======================
+  // =====================================================
   // WEBRTC SIGNALING
-  // ======================
+  // =====================================================
   const forwardToUser = (targetUserId, event, data) => {
     const targetSocketId = userIdToSocket.get(targetUserId);
     if (targetSocketId) {
@@ -279,9 +292,9 @@ io.on('connection', socket => {
     forwardToUser(d.to, 'webrtc-ice', d)
   );
 
-  // ======================
+  // =====================================================
   // DISCONNECT
-  // ======================
+  // =====================================================
   socket.on('disconnect', reason => {
     statsUsers.delete(socket.id);
     io.emit('stats:broadcast', Array.from(statsUsers.values()));
@@ -321,11 +334,11 @@ io.on('connection', socket => {
   });
 });
 
-// ======================
+// =====================================================
 // START
-// ======================
+// =====================================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Voice + Stats ativos | Mobile otimizado`);
+  console.log(`Voice + Stats ativos | Estado global OK`);
 });
